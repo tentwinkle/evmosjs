@@ -14,7 +14,7 @@ import {
   createStdSignDocFromProto,
   SIGN_DIRECT,
 } from './transaction'
-import { JSONOptions } from '../proto/tests/common'
+import { JSONOptions } from '../registry/registry'
 
 import {
   from,
@@ -175,8 +175,6 @@ describe('test protobuf intermediate object generators', () => {
   })
 })
 
-describe('test proto transaction generation against binary', () => {
-  it('correctly encodes body and authinfo fields', () => {
     const msg = createMsgSend(
       'ethm1tfegf50n5xl0hd5cxfzjca3ylsfpg0fned5gqm',
       'ethm1tfegf50n5xl0hd5cxfzjca3ylsfpg0fned5gqm',
