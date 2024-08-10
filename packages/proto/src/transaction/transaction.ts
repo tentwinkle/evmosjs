@@ -1,32 +1,55 @@
 import { Keccak } from 'sha3'
-import * as tx from '../proto/cosmos/tx/v1beta1/tx'
-import * as signing from '../proto/cosmos/tx/signing/v1beta1/signing'
-import * as coin from '../proto/cosmos/base/v1beta1/coin'
-import * as eth from '../proto/ethermint/crypto/v1/ethsecp256k1/keys'
-import * as secp from '../proto/cosmos/crypto/secp256k1/keys'
+import { Any } from '@bufbuild/protobuf'
+import { StdFee, makeSignDoc, serializeSignDoc } from '@cosmjs/amino'
+import { Coin } from '../proto/cosmos/base/coin.js'
+import {
+  TxBody,
+  Fee,
+  SignerInfo,
+  ModeInfo,
+  // eslint-disable-next-line camelcase
+  ModeInfo_Single,
+  AuthInfo,
+  SignDoc,
+} from '../proto/cosmos/transactions/tx.js'
+import { PubKey } from '../proto/ethermint/crypto/keys.js'
+import { PubKey as SECP256k1 } from '../proto/cosmos/crypto/secp256k1/keys.js'
+import { SignMode } from '../proto/cosmos/transactions/signing.js'
+import { AminoTypes } from '../amino/registry.js'
+import { convertProtoMessageToObject } from '../amino/objectConverter.js'
 
-import { createAnyMessage, MessageGenerated } from '../messages/utils'
+import { createAnyMessage, MessageGenerated } from '../messages/common.js'
 
-export const SIGN_DIRECT =
-  signing.cosmos.tx.signing.v1beta1.SignMode.SIGN_MODE_DIRECT
-export const LEGACY_AMINO =
-  signing.cosmos.tx.signing.v1beta1.SignMode.SIGN_MODE_LEGACY_AMINO_JSON
+export const SIGN_DIRECT = SignMode.DIRECT
+export const LEGACY_AMINO = SignMode.LEGACY_AMINO_JSON
 
-export namespace protoTxNamespace {
-  /* global cosmos */
-  /* eslint no-undef: "error" */
-  export import txn = tx.cosmos.tx.v1beta1
+// Returns a base-64-encoded keccak256 hash of the
+// given content bytes.
+export function keccak256ToBase64(content: Uint8Array) {
+  const hash = new Keccak(256)
+  hash.update(Buffer.from(content))
+  const bytes = hash.digest('binary')
+  return Buffer.from(bytes).toString('base64')
+}
+
+// Converts an array of Protobuf MessageGenerated
+// objects to Amino representations using the registry.
+export function convertProtoMessagesToAmino(protoMessages: MessageGenerated[]) {
+  return protoMessages.map((wrappedProtoMsg) => {
+    const protoObject = convertProtoMessageToObject(wrappedProtoMsg.message)
+    return AminoTypes.toAmino(protoObject)
+  })
 }
 
 // TODO: messages should be typed as proto message. A types package is needed to export that type without problems
 export function createBodyWithMultipleMessages(messages: any[], memo: string) {
-  const content: any[] = []
+  const content: Any[] = []
 
   messages.forEach((message) => {
     content.push(createAnyMessage(message))
   })
 
-  return new tx.cosmos.tx.v1beta1.TxBody({
+  return new TxBody({
     messages: content,
     memo,
   })
@@ -37,14 +60,14 @@ export function createBody(message: any, memo: string) {
 }
 
 export function createFee(fee: string, denom: string, gasLimit: number) {
-  return new tx.cosmos.tx.v1beta1.Fee({
+  return new Fee({
     amount: [
-      new coin.cosmos.base.v1beta1.Coin({
+      new Coin({
         denom,
         amount: fee,
       }),
     ],
-    gas_limit: gasLimit,
+    gasLimit: BigInt(gasLimit),
   })
 }
 
@@ -59,7 +82,7 @@ export function createSignerInfo(
   // NOTE: secp256k1 is going to be removed from evmos
   if (algo === 'secp256k1') {
     pubkey = {
-      message: new secp.cosmos.crypto.secp256k1.PubKey({
+      message: new SECP256k1({
         key: publicKey,
       }),
       path: 'cosmos.crypto.secp256k1.PubKey',
@@ -67,51 +90,105 @@ export function createSignerInfo(
   } else {
     // NOTE: assume ethsecp256k1 by default because after mainnet is the only one that is going to be supported
     pubkey = {
-      message: new eth.ethermint.crypto.v1.ethsecp256k1.PubKey({
+      message: new PubKey({
         key: publicKey,
       }),
       path: 'ethermint.crypto.v1.ethsecp256k1.PubKey',
     }
   }
 
-  const signerInfo = new tx.cosmos.tx.v1beta1.SignerInfo({
-    public_key: createAnyMessage(pubkey),
-    mode_info: new tx.cosmos.tx.v1beta1.ModeInfo({
-      single: new tx.cosmos.tx.v1beta1.ModeInfo.Single({
-        mode,
-      }),
+  const signerInfo = new SignerInfo({
+    publicKey: createAnyMessage(pubkey),
+    modeInfo: new ModeInfo({
+      sum: {
+        value: new ModeInfo_Single({
+          mode,
+        }),
+        case: 'single',
+      },
     }),
-    sequence,
+    sequence: BigInt(sequence),
   })
 
   return signerInfo
 }
 
-export function createAuthInfo(
-  signerInfo: tx.cosmos.tx.v1beta1.SignerInfo,
-  fee: tx.cosmos.tx.v1beta1.Fee,
-) {
-  return new tx.cosmos.tx.v1beta1.AuthInfo({
-    signer_infos: [signerInfo],
+export function createAuthInfo(signerInfo: SignerInfo, fee: Fee) {
+  return new AuthInfo({
+    signerInfos: [signerInfo],
     fee,
   })
 }
 
-export function createSigDoc(
+export function createSignDoc(
   bodyBytes: Uint8Array,
   authInfoBytes: Uint8Array,
   chainId: string,
   accountNumber: number,
 ) {
-  return new tx.cosmos.tx.v1beta1.SignDoc({
-    body_bytes: bodyBytes,
-    auth_info_bytes: authInfoBytes,
-    chain_id: chainId,
-    account_number: accountNumber,
+  return new SignDoc({
+    bodyBytes,
+    authInfoBytes,
+    chainId,
+    accountNumber: BigInt(accountNumber),
   })
 }
 
-// TODO: messages should be typed as proto message. A types package is needed to export that type without problems
+export function createStdFee(amount: string, denom: string, gasLimit: number) {
+  return {
+    amount: [
+      {
+        amount,
+        denom,
+      },
+    ],
+    gas: gasLimit.toString(),
+  }
+}
+
+export function createStdSignDocFromProto(
+  protoMessages: any[],
+  fee: StdFee,
+  chainId: string,
+  memo: string,
+  sequence: number,
+  accountNumber: number,
+) {
+  const aminoMsgs = convertProtoMessagesToAmino(protoMessages)
+  return makeSignDoc(aminoMsgs, fee, chainId, memo, accountNumber, sequence)
+}
+
+// Returns the hashed digest of the corresponding StdSignDoc.
+// If the StdSignDoc cannot be generated (e.g. types are not
+// supported), returns an empty string.
+export function createStdSignDigestFromProto(
+  messages: any,
+  memo: string,
+  fee: string,
+  denom: string,
+  gasLimit: number,
+  sequence: number,
+  accountNumber: number,
+  chainId: string,
+) {
+  try {
+    const stdFee = createStdFee(fee, denom, gasLimit)
+    const stdSignDoc = createStdSignDocFromProto(
+      messages,
+      stdFee,
+      chainId,
+      memo,
+      sequence,
+      accountNumber,
+    )
+
+    return keccak256ToBase64(serializeSignDoc(stdSignDoc))
+  } catch {
+    return ''
+  }
+}
+
+// TODO: messages should be typed as MessageGenerated
 export function createTransactionWithMultipleMessages(
   messages: any,
   memo: string,
@@ -128,58 +205,50 @@ export function createTransactionWithMultipleMessages(
   const feeMessage = createFee(fee, denom, gasLimit)
   const pubKeyDecoded = Buffer.from(pubKey, 'base64')
 
-  // AMINO
-  const signInfoAmino = createSignerInfo(
+  const aminoSignerInfo = createSignerInfo(
     algo,
     new Uint8Array(pubKeyDecoded),
     sequence,
     LEGACY_AMINO,
   )
-
-  const authInfoAmino = createAuthInfo(signInfoAmino, feeMessage)
-
-  const signDocAmino = createSigDoc(
-    body.serializeBinary(),
-    authInfoAmino.serializeBinary(),
-    chainId,
+  const aminoAuthInfo = createAuthInfo(aminoSignerInfo, feeMessage)
+  const aminoSignDigest = createStdSignDigestFromProto(
+    messages,
+    memo,
+    fee,
+    denom,
+    gasLimit,
+    sequence,
     accountNumber,
+    chainId,
   )
 
-  const hashAmino = new Keccak(256)
-  hashAmino.update(Buffer.from(signDocAmino.serializeBinary()))
-  const toSignAmino = hashAmino.digest('binary')
-
-  // SignDirect
-  const signInfoDirect = createSignerInfo(
+  const directSignerInfo = createSignerInfo(
     algo,
     new Uint8Array(pubKeyDecoded),
     sequence,
     SIGN_DIRECT,
   )
-
-  const authInfoDirect = createAuthInfo(signInfoDirect, feeMessage)
-
-  const signDocDirect = createSigDoc(
-    body.serializeBinary(),
-    authInfoDirect.serializeBinary(),
+  const directAuthInfo = createAuthInfo(directSignerInfo, feeMessage)
+  const directSignDoc = createSignDoc(
+    body.toBinary(),
+    directAuthInfo.toBinary(),
     chainId,
     accountNumber,
   )
 
-  const hashDirect = new Keccak(256)
-  hashDirect.update(Buffer.from(signDocDirect.serializeBinary()))
-  const toSignDirect = hashDirect.digest('binary')
+  const directSignDigest = keccak256ToBase64(directSignDoc.toBinary())
 
   return {
     legacyAmino: {
       body,
-      authInfo: authInfoAmino,
-      signBytes: toSignAmino.toString('base64'),
+      authInfo: aminoAuthInfo,
+      signBytes: aminoSignDigest,
     },
     signDirect: {
       body,
-      authInfo: authInfoDirect,
-      signBytes: toSignDirect.toString('base64'),
+      authInfo: directAuthInfo,
+      signBytes: directSignDigest,
     },
   }
 }
