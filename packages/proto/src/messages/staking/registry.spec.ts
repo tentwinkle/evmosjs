@@ -7,11 +7,7 @@ import {
   MsgCancelUnbondingDelegation,
   MsgEditValidator,
   MsgCreateValidator,
-} from '../../proto/cosmos/staking/tx'
-import {
-  Description,
-  CommissionRates,
-} from '../../proto/cosmos/staking/staking'
+
 
 describe('test staking registry types against expected', () => {
   it('exactly equals expected types', () => {
