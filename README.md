@@ -1,7 +1,5 @@
 # EvmosJS
 
-This is a monorepo that contains the EvmosJS collection of npm packages related to Evmos,
-an Ethereum-compatible blockchain platform that supports Ethereum Virtual Machine (EVM) smart contracts.
 
 ## Packages
 
